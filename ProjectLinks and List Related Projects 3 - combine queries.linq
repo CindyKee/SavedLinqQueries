@@ -11,8 +11,8 @@
   <Reference>C:\GitHub\filevine\Filevine\bin\Filevine.Common.dll</Reference>
   <Reference>C:\GitHub\filevine\Filevine\bin\Filevine.Domain.dll</Reference>
   <Reference>C:\GitHub\filevine\Filevine\bin\Filevine.Services.dll</Reference>
-  <Namespace>Filevine.Common.Cache.Objects</Namespace>
   <Namespace>Filevine.Common.Cache.Interfaces</Namespace>
+  <Namespace>Filevine.Common.Cache.Objects</Namespace>
   <Namespace>Filevine.Domain.Entities</Namespace>
   <Namespace>Filevine.Services</Namespace>
 </Query>
@@ -23,29 +23,9 @@ void Main()
 
 	var projectID = 169676;
 
-	// Get ProjectLink elements from database
+	// Get ProjectLink elements from this project
 	var projectLinks = CustomData.OfType<ProjectLinkCustomDataElement>()
-		.Where(e => e.ProjectID == projectID)
-		.Select(p => new
-		{
-			Project = p.Project,
-			ProjectLink = p.ProjectLink,
-			CustomSection = p.CustomSection,
-			CustomField = p.CustomField,
-			CollectionItemGuid = p.CollectionItemGuid
-		})
-		.Union(
-			CustomData.OfType<ProjectLinkListCustomDataElement>()
-				.SelectMany(p => p.ProjectLinkListItems)
-				.Where(e => e.ProjectID == projectID)
-				.Select(p => new 
-				{
-					Project = p.ProjectLinkListCustomDataElement.Project,
-					ProjectLink = p.ProjectLink,
-					CustomSection = p.ProjectLinkListCustomDataElement.CustomSection,
-					CustomField = p.ProjectLinkListCustomDataElement.CustomField,
-					CollectionItemGuid = p.CollectionItemGuid
-				}))
+		.Where(e => e.ProjectID == projectID || e.ProjectLinkID == projectID)
 		.ToList()
 		.Select(e => new ProjectRelatedProject
 		{
@@ -55,22 +35,47 @@ void Main()
 			SectionName = e.CustomSection.Name,
 			FieldKey = e.CustomField.InternalName,
 			FieldName = e.CustomField.Name,
-			CollectionItemGuid = e.CollectionItemGuid
+			CollectionItemGuid = e.CollectionItemGuid,
+			SectionPosition = e.CustomSection.Position,
+			FieldPosition = e.CustomField.Row,
+			ListSortOrder = null
+		})
+		.Union(
+			CustomData.OfType<ProjectLinkListCustomDataElement>()
+				.SelectMany(p => p.ProjectLinkListItems)
+				.Where(e => e.ProjectID == projectID || e.ProjectLinkID == projectID)
+				.ToList()
+				.Select(e => new ProjectRelatedProject
+				{
+					RelatedProject = AutoMapper.Mapper.Map<Project, ProjectGlance>(e.ProjectLink),
+					Project = AutoMapper.Mapper.Map<Project, ProjectGlance>(e.ProjectLinkListCustomDataElement.Project),
+					SectionKey = e.ProjectLinkListCustomDataElement.CustomSection.InternalName,
+					SectionName = e.ProjectLinkListCustomDataElement.CustomSection.Name,
+					FieldKey = e.ProjectLinkListCustomDataElement.CustomField.InternalName,
+					FieldName = e.ProjectLinkListCustomDataElement.CustomField.Name,
+					CollectionItemGuid = e.CollectionItemGuid,
+					SectionPosition = e.ProjectLinkListCustomDataElement.CustomSection.Position,
+					FieldPosition = e.ProjectLinkListCustomDataElement.CustomField.Row,
+					ListSortOrder = e.Position
+				}))
+		//.ToList()
+		.OrderBy(p => p.Project.ID)
+		.ThenBy(p => p.RelatedProject.ID == projectID)		// False(0) comes before True (1)
+		.ThenBy(p => p.SectionPosition)
+		.ThenBy(p => p.CollectionItemGuid)
+		.ThenBy(p => p.FieldPosition)
+		.ThenBy(p => p.ListSortOrder)
+		.Select(p => new ProjectRelatedProjectResponse
+		{
+			RelatedProject = projectID == p.Project.ID ? p.RelatedProject : p.Project,		// handle backlinks here, too
+			Breadcrumbs = getBreadcrumbs(p.Project.OrgName, p.Project.ProjectOrClientName, p.Project.IsArchived, p.Project.ID, p.Project.ClientPictureUrl,
+				p.SectionKey, p.SectionName, p.GetLastBreadcrumbs)
 		})
 		.ToList();
 
+
+	projectLinks.Select(l => new { l.RelatedProject.ProjectOrClientName, l.Breadcrumbs }).Dump();
 	//projectLinks.Dump();
-
-	// Convert to response objects, complete with Breadcrumbs list
-	var responses = projectLinks
-		.Select(p => new ProjectRelatedProjectResponse
-		{
-			RelatedProject = p.RelatedProject,
-			Breadcrumbs = getBreadcrumbs(p.Project.OrgName, p.Project.ProjectOrClientName, p.Project.IsArchived, p.Project.ID, p.Project.ClientPictureUrl,
-				p.SectionKey, p.SectionName, p.GetLastBreadcrumbs)
-		});
-
-	responses.Dump();
 }
 
 // Define other methods and classes here
@@ -83,6 +88,9 @@ public class ProjectRelatedProject
 	public string FieldKey { get; set; }
 	public string FieldName { get; set; }
 	public Guid? CollectionItemGuid { get; set; }
+	public int SectionPosition { get; set; }
+	public int FieldPosition { get; set; }
+	public int? ListSortOrder { get; set; }
 
 	// Related Projects from Project Links
 	public ProjectGlance RelatedProject { get; set; }
@@ -126,7 +134,6 @@ public class ProjectRelatedProjectResponse
 	public IEnumerable<Breadcrumb> Breadcrumbs { get; set; }
 }
 
-//public static IEnumerable<Breadcrumb> getBreadcrumbs(ProjectRelatedProject projectInfo)
 public static IEnumerable<Breadcrumb> getBreadcrumbs(string orgName, string projectName, bool isArchived, int projectID, string pictureUrl,
 	string sectionKey, string sectionName, Func<string, IEnumerable<Breadcrumb>> getLastBreadcrumbs)
 {
@@ -137,3 +144,4 @@ public static IEnumerable<Breadcrumb> getBreadcrumbs(string orgName, string proj
 	//	var parent = projectInfo.Project;
 	return Breadcrumb.GetBreadcrumbs(orgName, projectName, isArchived, projectID, pictureUrl, $"custom/{sectionKey}", sectionName, sectionIcon, getLastBreadcrumbs);
 }
+
